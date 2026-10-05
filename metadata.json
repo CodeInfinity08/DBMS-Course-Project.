@@ -1,0 +1,6 @@
+{
+  "name": "AquaFlow - Water Tanker Delivery & Fleet Management System",
+  "description": "Real-time water tanker dispatch, live driver GPS tracking, fleet inventory status, and relational database management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
