@@ -73,8 +73,9 @@ export const ActiveDeliveries: React.FC<ActiveDeliveriesProps> = ({
       (t) => t.Status === 'Available' && t.TypeID === b.TypeID
     );
     const idleDriver = drivers.find((dr) => {
+      const isOffDuty = dr.IsOnDuty === false;
       const isBusy = deliveries.some((d) => d.DriverID === dr.DriverID && d.DeliveredTime === null);
-      return !isBusy;
+      return !isOffDuty && !isBusy;
     });
 
     setSelectedTankerId(matchingTanker?.TankerID || null);
@@ -528,23 +529,40 @@ export const ActiveDeliveries: React.FC<ActiveDeliveriesProps> = ({
                   {drivers.map((dr) => {
                     const isSelected = selectedDriverId === dr.DriverID;
                     const isBusy = deliveries.some((d) => d.DriverID === dr.DriverID && d.DeliveredTime === null);
+                    const isOffDuty = dr.IsOnDuty === false;
 
                     return (
                       <div
                         key={`modal-driver-${dr.DriverID}`}
-                        onClick={() => setSelectedDriverId(dr.DriverID)}
-                        className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
-                          isSelected
-                            ? 'bg-cyan-950/40 border-cyan-500 text-white shadow-sm'
-                            : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                        onClick={() => {
+                          if (isOffDuty) {
+                            setDispatchError(`Driver ${dr.Name} is currently OFF DUTY. Toggle them On Duty in the Fleet tab.`);
+                            return;
+                          }
+                          if (isBusy) {
+                            setDispatchError(`Driver ${dr.Name} is currently on an active delivery.`);
+                            return;
+                          }
+                          setDispatchError(null);
+                          setSelectedDriverId(dr.DriverID);
+                        }}
+                        className={`p-3 rounded-xl border transition-all flex items-center justify-between ${
+                          isOffDuty
+                            ? 'bg-slate-950/40 border-slate-800/40 opacity-50 cursor-not-allowed text-slate-500'
+                            : isBusy
+                            ? 'bg-slate-950 border-slate-800/70 text-slate-400 cursor-not-allowed'
+                            : isSelected
+                            ? 'bg-cyan-950/40 border-cyan-500 text-white shadow-sm cursor-pointer'
+                            : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700 cursor-pointer'
                         }`}
                       >
                         <div className="flex items-center gap-2">
                           <input
                             type="radio"
                             checked={isSelected}
-                            onChange={() => setSelectedDriverId(dr.DriverID)}
-                            className="text-cyan-500"
+                            disabled={isOffDuty || isBusy}
+                            onChange={() => !isOffDuty && !isBusy && setSelectedDriverId(dr.DriverID)}
+                            className="text-cyan-500 disabled:opacity-40"
                           />
                           <span className="font-medium">{dr.Name}</span>
                           <span className="text-[11px] text-slate-500 font-mono">({dr.License_No})</span>
@@ -552,10 +570,14 @@ export const ActiveDeliveries: React.FC<ActiveDeliveriesProps> = ({
 
                         <span
                           className={`px-2 py-0.5 rounded text-[11px] ${
-                            isBusy ? 'bg-amber-950 text-amber-300 border border-amber-800' : 'bg-emerald-950 text-emerald-300'
+                            isOffDuty
+                              ? 'bg-slate-800 text-slate-400 border border-slate-700 font-mono'
+                              : isBusy
+                              ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                              : 'bg-emerald-950 text-emerald-300'
                           }`}
                         >
-                          {isBusy ? 'Busy On Delivery' : 'Available'}
+                          {isOffDuty ? 'Off Duty' : isBusy ? 'Busy On Delivery' : 'Available'}
                         </span>
                       </div>
                     );

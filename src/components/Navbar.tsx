@@ -14,7 +14,8 @@ import {
   Calendar,
   Database,
   BarChart3,
-  Layers
+  Layers,
+  Bell
 } from 'lucide-react';
 import { ActiveNavTab, Tanker, Delivery } from '../types.ts';
 
@@ -31,6 +32,7 @@ interface NavbarProps {
   onOpenDispatch: () => void;
   onResetDB: () => void;
   onExportSQL: () => void;
+  onTestAlert?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -45,7 +47,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenNewBooking,
   onOpenDispatch,
   onResetDB,
-  onExportSQL
+  onExportSQL,
+  onTestAlert
 }) => {
   const activeDeliveriesCount = deliveries.filter((d) => d.DeliveredTime === null).length;
   const availableTankersCount = tankers.filter((t) => t.Status === 'Available').length;
@@ -108,6 +111,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               {soundEnabled ? <Volume2 className="w-4 h-4 text-cyan-400" /> : <VolumeX className="w-4 h-4 text-slate-500" />}
             </button>
+
+            {onTestAlert && (
+              <button
+                onClick={onTestAlert}
+                className="p-1.5 text-slate-400 hover:text-emerald-300 bg-slate-800/60 hover:bg-slate-700 rounded-lg border border-slate-700/60 transition-colors flex items-center gap-1"
+                title="Test Driver Completed Delivery Alert & Chime"
+              >
+                <Bell className="w-4 h-4 text-emerald-400" />
+              </button>
+            )}
           </div>
 
           {/* Action Buttons */}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Delivery, DriverTelemetry, Tanker, Driver, Address, TankerType, Booking } from '../types.ts';
 import { CENTRAL_DEPOT } from '../db/initialData.ts';
 
@@ -32,9 +32,11 @@ export function useDriverTelemetry(
   drivers: Driver[],
   addresses: Address[],
   tankerTypes: TankerType[],
-  simulationSpeed: number = 1 // 1x, 2x, 5x, or 0 for paused
+  simulationSpeed: number = 1, // 1x, 2x, 5x, or 0 for paused
+  onDeliveryArrival?: (deliveryId: number) => void
 ) {
   const [telemetries, setTelemetries] = useState<Record<number, DriverTelemetry>>({});
+  const completedRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
     // Identify active in-transit deliveries (DeliveredTime === null)
@@ -154,6 +156,11 @@ export function useDriverTelemetry(
             newProgress = 100;
             status = 'delivering_discharge';
             waterRem = Math.max(0, waterRem - (item.totalCapacityLiters / 30) * simulationSpeed);
+
+            if (waterRem <= 0 && !completedRef.current.has(item.deliveryId)) {
+              completedRef.current.add(item.deliveryId);
+              onDeliveryArrival?.(item.deliveryId);
+            }
           } else {
             status = 'en_route_delivery';
           }

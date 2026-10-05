@@ -42,6 +42,7 @@ export interface Driver {
   Name: string;
   Phone: string;
   License_No: string;
+  IsOnDuty?: boolean;
 }
 
 export interface Booking {

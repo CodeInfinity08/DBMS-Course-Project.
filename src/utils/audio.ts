@@ -4,6 +4,9 @@ export function playChime(type: 'dispatch' | 'delivered' | 'alert' | 'click') {
     const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContext) return;
     const ctx = new AudioContext();
+    if (ctx.state === 'suspended') {
+      ctx.resume();
+    }
 
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();

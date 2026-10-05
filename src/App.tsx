@@ -15,6 +15,7 @@ import { FleetInventory } from './components/FleetInventory.tsx';
 import { BookingsView } from './components/BookingsView.tsx';
 import { DatabaseEditor } from './components/DatabaseEditor.tsx';
 import { AnalyticsView } from './components/AnalyticsView.tsx';
+import { ToastNotificationContainer, DeliveryToast } from './components/ToastNotification.tsx';
 import { ActiveNavTab, BookingDetailView, PaymentMethod, TankerStatus, TimeSlot } from './types.ts';
 import { Truck, X, AlertCircle, Send, CheckCircle2, Calendar } from 'lucide-react';
 
@@ -32,6 +33,7 @@ export default function App() {
     dispatchTanker,
     completeDelivery,
     updateTankerStatus,
+    updateDriverDuty,
     addTanker,
     addDriver,
     addCustomer,
@@ -44,7 +46,88 @@ export default function App() {
     generateSQLDump
   } = useDatabase();
 
-  // Real-time GPS Telemetry simulation
+  // Active Toast Notifications for dispatch alerts
+  const [toasts, setToasts] = useState<DeliveryToast[]>([]);
+
+  const handleDismissToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  // Trigger sound and toast notification when completing delivery
+  const handleCompleteDelivery = (deliveryId: number) => {
+    const del = db.deliveries.find((d) => d.DeliveryID === deliveryId);
+    if (!del || del.DeliveredTime !== null) return;
+
+    // Look up detailed info from bookingDetailsView
+    const booking = bookingDetailsView.find((b) => b.DeliveryID === deliveryId);
+    const driver = db.drivers.find((dr) => dr.DriverID === del.DriverID);
+    const tanker = db.tankers.find((t) => t.TankerID === del.TankerID);
+
+    // 1. Update database
+    completeDelivery(deliveryId);
+
+    // 2. Play existing audio chime utility
+    if (soundEnabled) {
+      playChime('delivered');
+    }
+
+    // 3. Build rich dispatcher toast alert
+    const driverName = booking?.DriverName || driver?.Name || 'Fleet Driver';
+    const tankerPlate = booking?.License_Plate || tanker?.License_Plate || 'TS01WT1001';
+    const customerName = booking?.CustomerName || 'Resident Customer';
+    const areaName = booking?.AreaName || 'Municipal Zone';
+    const capacityLiters = booking?.Capacity_Liters || 6000;
+    const price = booking?.Price;
+
+    const newToast: DeliveryToast = {
+      id: `delivery-${deliveryId}-${Date.now()}`,
+      deliveryId,
+      bookingId: booking?.BookingID,
+      driverName,
+      driverPhone: booking?.DriverPhone || driver?.Phone,
+      tankerPlate,
+      customerName,
+      areaName,
+      street: booking?.Street,
+      pincode: booking?.Pincode,
+      capacityLiters,
+      price,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      soundPlayed: soundEnabled,
+    };
+
+    setToasts((prev) => [newToast, ...prev.slice(0, 4)]);
+  };
+
+  // Test chime & toast notification
+  const handleTestDeliveryAlert = () => {
+    if (soundEnabled) {
+      playChime('delivered');
+    }
+
+    const sampleDriver = db.drivers[0] || { Name: 'Ramesh Goud', Phone: '9100000001' };
+    const sampleTanker = db.tankers[0] || { License_Plate: 'TS01WT1001' };
+    const sampleArea = db.areas[0] || { AreaName: 'Gandhi Nagar' };
+
+    const testToast: DeliveryToast = {
+      id: `test-${Date.now()}`,
+      deliveryId: 99,
+      bookingId: 1,
+      driverName: sampleDriver.Name,
+      driverPhone: sampleDriver.Phone,
+      tankerPlate: sampleTanker.License_Plate,
+      customerName: 'Rajesh Sharma',
+      areaName: sampleArea.AreaName,
+      capacityLiters: 6000,
+      price: 1000,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      soundPlayed: soundEnabled,
+    };
+
+    setToasts((prev) => [testToast, ...prev.slice(0, 4)]);
+  };
+
+  // Real-time GPS Telemetry simulation with automatic arrival callback
   const { telemetries } = useDriverTelemetry(
     db.deliveries,
     db.bookings,
@@ -52,7 +135,8 @@ export default function App() {
     db.drivers,
     db.addresses,
     db.tankerTypes,
-    simulationSpeed
+    simulationSpeed,
+    handleCompleteDelivery
   );
 
   // Global Quick Dispatch Modal
@@ -78,18 +162,14 @@ export default function App() {
     if (soundEnabled) playChime('dispatch');
   };
 
-  // Trigger sound when completing delivery
-  const handleCompleteDelivery = (deliveryId: number) => {
-    completeDelivery(deliveryId);
-    if (soundEnabled) playChime('delivered');
-  };
-
   // Open dispatch pre-configured for a specific booking
   const handleOpenDispatchForBooking = (b: BookingDetailView) => {
     setSelectedQuickBookingId(b.BookingID);
     const matchingTanker = db.tankers.find((t) => t.Status === 'Available' && t.TypeID === b.TypeID);
     const idleDriver = db.drivers.find((dr) => {
-      return !db.deliveries.some((d) => d.DriverID === dr.DriverID && d.DeliveredTime === null);
+      const isOffDuty = dr.IsOnDuty === false;
+      const isBusy = db.deliveries.some((d) => d.DriverID === dr.DriverID && d.DeliveredTime === null);
+      return !isOffDuty && !isBusy;
     });
     setSelectedQuickTankerId(matchingTanker?.TankerID || null);
     setSelectedQuickDriverId(idleDriver?.DriverID || null);
@@ -172,6 +252,7 @@ export default function App() {
         onOpenDispatch={handleOpenGeneralDispatch}
         onResetDB={handleResetWithConfirm}
         onExportSQL={handleExportSQL}
+        onTestAlert={handleTestDeliveryAlert}
       />
 
       {/* Main View Area */}
@@ -235,6 +316,7 @@ export default function App() {
             onUpdateTankerStatus={updateTankerStatus}
             onAddTanker={addTanker}
             onAddDriver={addDriver}
+            onUpdateDriverDuty={updateDriverDuty}
           />
         )}
 
@@ -270,6 +352,8 @@ export default function App() {
             areas={db.areas}
             payments={db.payments}
             tankerTypes={db.tankerTypes}
+            drivers={db.drivers}
+            deliveries={db.deliveries}
           />
         )}
       </main>
@@ -390,22 +474,55 @@ export default function App() {
                   {db.drivers.map((dr) => {
                     const isSelected = selectedQuickDriverId === dr.DriverID;
                     const isBusy = db.deliveries.some((d) => d.DriverID === dr.DriverID && d.DeliveredTime === null);
+                    const isOffDuty = dr.IsOnDuty === false;
 
                     return (
                       <div
                         key={`quick-dr-${dr.DriverID}`}
-                        onClick={() => setSelectedQuickDriverId(dr.DriverID)}
-                        className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
-                          isSelected
-                            ? 'bg-cyan-950/50 border-cyan-500 text-white'
-                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                        onClick={() => {
+                          if (isOffDuty) {
+                            setQuickDispatchError(`Driver ${dr.Name} is currently OFF DUTY. Toggle them On Duty in the Fleet tab.`);
+                            if (soundEnabled) playChime('alert');
+                            return;
+                          }
+                          if (isBusy) {
+                            setQuickDispatchError(`Driver ${dr.Name} is currently on an active delivery.`);
+                            if (soundEnabled) playChime('alert');
+                            return;
+                          }
+                          setQuickDispatchError(null);
+                          setSelectedQuickDriverId(dr.DriverID);
+                        }}
+                        className={`p-2.5 rounded-xl border transition-all ${
+                          isOffDuty
+                            ? 'bg-slate-950/40 border-slate-800/40 text-slate-500 opacity-60 cursor-not-allowed'
+                            : isBusy
+                            ? 'bg-slate-950 border-slate-800/70 text-slate-400 cursor-not-allowed'
+                            : isSelected
+                            ? 'bg-cyan-950/50 border-cyan-500 text-white cursor-pointer'
+                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700 cursor-pointer'
                         }`}
                       >
-                        <div className="font-semibold text-white truncate">{dr.Name}</div>
+                        <div className="font-semibold text-white truncate flex items-center justify-between">
+                          <span>{dr.Name}</span>
+                          {isOffDuty && (
+                            <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                              OFF DUTY
+                            </span>
+                          )}
+                        </div>
                         <div className="text-[10px] text-slate-400 font-mono flex items-center justify-between mt-0.5">
                           <span>{dr.Phone}</span>
-                          <span className={isBusy ? 'text-amber-400 font-bold' : 'text-emerald-400'}>
-                            {isBusy ? 'Busy' : 'Free'}
+                          <span
+                            className={
+                              isOffDuty
+                                ? 'text-slate-500 font-semibold'
+                                : isBusy
+                                ? 'text-amber-400 font-bold'
+                                : 'text-emerald-400'
+                            }
+                          >
+                            {isOffDuty ? 'Unavailable' : isBusy ? 'Busy' : 'Ready'}
                           </span>
                         </div>
                       </div>
@@ -572,6 +689,15 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Real-time Dispatcher Toast Notifications */}
+      <ToastNotificationContainer
+        toasts={toasts}
+        onDismiss={handleDismissToast}
+        onNavigateToBooking={() => setActiveTab('deliveries')}
+        soundEnabled={soundEnabled}
+        onTestChime={handleTestDeliveryAlert}
+      />
     </div>
   );
 }

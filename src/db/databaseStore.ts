@@ -159,6 +159,11 @@ export function useDatabase() {
         };
       }
 
+      const driver = db.drivers.find((d) => d.DriverID === driverId);
+      if (driver && driver.IsOnDuty === false) {
+        return { valid: false, error: `SQLSTATE 45000: Driver ${driver.Name} is currently OFF DUTY and cannot be dispatched` };
+      }
+
       const driverBusyCount = db.deliveries.filter(
         (d) => d.DriverID === driverId && d.DeliveredTime === null
       ).length;
@@ -276,9 +281,19 @@ export function useDatabase() {
       const newId = prev.drivers.length > 0 ? Math.max(...prev.drivers.map((d) => d.DriverID)) + 1 : 1;
       return {
         ...prev,
-        drivers: [...prev.drivers, { DriverID: newId, Name: name, Phone: phone, License_No: licenseNo }]
+        drivers: [...prev.drivers, { DriverID: newId, Name: name, Phone: phone, License_No: licenseNo, IsOnDuty: true }]
       };
     });
+  }, []);
+
+  // Update Driver On/Off Duty availability status
+  const updateDriverDuty = useCallback((driverId: number, isOnDuty: boolean) => {
+    setDb((prev) => ({
+      ...prev,
+      drivers: prev.drivers.map((d) =>
+        d.DriverID === driverId ? { ...d, IsOnDuty: isOnDuty } : d
+      )
+    }));
   }, []);
 
   // Add Customer
@@ -517,6 +532,7 @@ export function useDatabase() {
     dispatchTanker,
     completeDelivery,
     updateTankerStatus,
+    updateDriverDuty,
     addTanker,
     addDriver,
     addCustomer,

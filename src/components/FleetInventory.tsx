@@ -29,6 +29,7 @@ interface FleetInventoryProps {
   onUpdateTankerStatus: (tankerId: number, status: TankerStatus) => void;
   onAddTanker: (typeId: number, licensePlate: string, status?: TankerStatus) => void;
   onAddDriver: (name: string, phone: string, licenseNo: string) => void;
+  onUpdateDriverDuty?: (driverId: number, isOnDuty: boolean) => void;
 }
 
 export const FleetInventory: React.FC<FleetInventoryProps> = ({
@@ -38,7 +39,8 @@ export const FleetInventory: React.FC<FleetInventoryProps> = ({
   deliveries,
   onUpdateTankerStatus,
   onAddTanker,
-  onAddDriver
+  onAddDriver,
+  onUpdateDriverDuty
 }) => {
   const [filterStatus, setFilterStatus] = useState<'All' | TankerStatus>('All');
   const [isAddTankerOpen, setIsAddTankerOpen] = useState(false);
@@ -330,37 +332,92 @@ export const FleetInventory: React.FC<FleetInventoryProps> = ({
 
       {/* Driver Asset Management Roster */}
       <div className="space-y-4 pt-4 border-t border-slate-800">
-        <h3 className="text-base font-bold text-white flex items-center gap-2">
-          <UserCheck className="w-4 h-4 text-cyan-400" />
-          <span>Authorized Drivers ({drivers.length})</span>
-        </h3>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <UserCheck className="w-4 h-4 text-cyan-400" />
+              <span>Authorized Drivers ({drivers.length})</span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Toggle driver duty status to immediately update availability in the database and prevent dispatching off-duty personnel.
+            </p>
+          </div>
+
+          {/* Quick Roster Status Badges */}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-[11px] flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+              <span>{drivers.filter((d) => d.IsOnDuty !== false).length} On Duty</span>
+            </span>
+            <span className="px-2.5 py-1 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-400 font-mono text-[11px] flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-slate-500"></span>
+              <span>{drivers.filter((d) => d.IsOnDuty === false).length} Off Duty</span>
+            </span>
+          </div>
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {drivers.map((driver) => {
             const activeDel = deliveries.find((d) => d.DriverID === driver.DriverID && d.DeliveredTime === null);
+            const isOnDuty = driver.IsOnDuty !== false;
 
             return (
               <div
                 key={`driver-card-${driver.DriverID}`}
-                className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-3"
+                className={`border rounded-2xl p-4 shadow-xl space-y-3 transition-all ${
+                  !isOnDuty
+                    ? 'bg-slate-950/60 border-slate-800/60 opacity-80 ring-1 ring-slate-800/50'
+                    : 'bg-slate-900 border-slate-800 hover:border-slate-700'
+                }`}
               >
+                {/* Header with Avatar & Status */}
                 <div className="flex items-center justify-between">
-                  <div className="w-8 h-8 rounded-full bg-cyan-950 border border-cyan-800/60 flex items-center justify-center text-cyan-400 font-bold text-xs">
+                  <div
+                    className={`w-8 h-8 rounded-full border flex items-center justify-center font-bold text-xs ${
+                      !isOnDuty
+                        ? 'bg-slate-900 border-slate-800 text-slate-500'
+                        : activeDel
+                        ? 'bg-amber-950 border-amber-800/60 text-amber-400'
+                        : 'bg-cyan-950 border-cyan-800/60 text-cyan-400'
+                    }`}
+                  >
                     {driver.Name.charAt(0)}
                   </div>
+
                   <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                      activeDel
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold flex items-center gap-1 ${
+                      !isOnDuty
+                        ? 'bg-slate-800/80 text-slate-400 border border-slate-700/80'
+                        : activeDel
                         ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
                         : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
                     }`}
                   >
-                    {activeDel ? 'ON DELIVERY' : 'AVAILABLE'}
+                    {!isOnDuty ? (
+                      <>
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
+                        <span>OFF DUTY</span>
+                      </>
+                    ) : activeDel ? (
+                      <>
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
+                        <span>ON DELIVERY</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                        <span>AVAILABLE</span>
+                      </>
+                    )}
                   </span>
                 </div>
 
+                {/* Driver Info */}
                 <div>
-                  <h4 className="text-sm font-bold text-white">{driver.Name}</h4>
+                  <h4 className="text-sm font-bold text-white flex items-center justify-between">
+                    <span>{driver.Name}</span>
+                    <span className="text-[10px] font-mono text-slate-500 font-normal">#{driver.DriverID}</span>
+                  </h4>
                   <div className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
                     <Phone className="w-3 h-3 text-cyan-400" />
                     <a href={`tel:${driver.Phone}`} className="hover:text-cyan-300 font-mono">
@@ -369,9 +426,40 @@ export const FleetInventory: React.FC<FleetInventoryProps> = ({
                   </div>
                 </div>
 
+                {/* License Tag */}
                 <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/80 text-[11px] text-slate-400 flex items-center gap-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 text-slate-500" />
                   <span className="font-mono">{driver.License_No}</span>
+                </div>
+
+                {/* ON / OFF DUTY TOGGLE SWITCH */}
+                <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-between">
+                  <div className="flex flex-col">
+                    <span className="text-[11px] font-semibold text-slate-300">Duty Status</span>
+                    <span className={`text-[10px] font-mono ${isOnDuty ? 'text-emerald-400' : 'text-slate-500'}`}>
+                      {isOnDuty ? 'On Duty' : 'Off Duty'}
+                    </span>
+                  </div>
+
+                  {/* Accessible Toggle Switch */}
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={isOnDuty}
+                    onClick={() => onUpdateDriverDuty?.(driver.DriverID, !isOnDuty)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                      isOnDuty ? 'bg-emerald-500' : 'bg-slate-700'
+                    }`}
+                    title={isOnDuty ? 'Click to switch Off Duty (prevents dispatch)' : 'Click to switch On Duty (available for dispatch)'}
+                  >
+                    <span className="sr-only">Toggle duty status</span>
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                        isOnDuty ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
                 </div>
               </div>
             );

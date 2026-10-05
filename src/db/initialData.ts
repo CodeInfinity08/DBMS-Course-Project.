@@ -68,10 +68,10 @@ export const INITIAL_TANKERS: Tanker[] = [
 ];
 
 export const INITIAL_DRIVERS: Driver[] = [
-  { DriverID: 1, Name: 'Ramesh Goud', Phone: '9100000001', License_No: 'DL-2026-0001' },
-  { DriverID: 2, Name: 'Venkatesh Yadav', Phone: '9100000002', License_No: 'DL-2026-0002' },
-  { DriverID: 3, Name: 'Srinivas Rao', Phone: '9100000003', License_No: 'DL-2026-0003' },
-  { DriverID: 4, Name: 'Mahesh Kumar', Phone: '9100000004', License_No: 'DL-2026-0004' }
+  { DriverID: 1, Name: 'Ramesh Goud', Phone: '9100000001', License_No: 'DL-2026-0001', IsOnDuty: true },
+  { DriverID: 2, Name: 'Venkatesh Yadav', Phone: '9100000002', License_No: 'DL-2026-0002', IsOnDuty: true },
+  { DriverID: 3, Name: 'Srinivas Rao', Phone: '9100000003', License_No: 'DL-2026-0003', IsOnDuty: true },
+  { DriverID: 4, Name: 'Mahesh Kumar', Phone: '9100000004', License_No: 'DL-2026-0004', IsOnDuty: true }
 ];
 
 export const INITIAL_BOOKINGS: Booking[] = [
