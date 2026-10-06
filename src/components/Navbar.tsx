@@ -15,7 +15,8 @@ import {
   Database,
   BarChart3,
   Layers,
-  Bell
+  Bell,
+  Users
 } from 'lucide-react';
 import { ActiveNavTab, Tanker, Delivery } from '../types.ts';
 
@@ -226,6 +227,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <Calendar className="w-4 h-4" />
             <span>Bookings</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('customers')}
+            className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap ${
+              activeTab === 'customers'
+                ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Customers</span>
           </button>
 
           <button

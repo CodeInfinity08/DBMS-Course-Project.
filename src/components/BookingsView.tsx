@@ -11,7 +11,10 @@ import {
   AlertCircle,
   Truck,
   DollarSign,
-  Ban
+  Ban,
+  Edit2,
+  Trash2,
+  Users
 } from 'lucide-react';
 import {
   BookingDetailView,
@@ -20,7 +23,8 @@ import {
   Address,
   TankerType,
   TimeSlot,
-  BookingStatus
+  BookingStatus,
+  Booking
 } from '../types.ts';
 
 interface BookingsViewProps {
@@ -30,10 +34,23 @@ interface BookingsViewProps {
   addresses: Address[];
   tankerTypes: TankerType[];
   onCancelBooking: (bookingId: number) => void;
-  onAddCustomer: (name: string, phone: string) => number;
+  onAddCustomer: (name: string, phone: string) => number | Customer;
   onAddAddress: (customerId: number, areaId: number, street: string, latitude: number, longitude: number) => number;
   onAddBooking: (addressId: number, typeId: number, scheduledDate: string, timeSlot: TimeSlot) => number;
   onOpenDispatchForBooking: (booking: BookingDetailView) => void;
+  onCreateCustomerBookingAtomic?: (params: {
+    customerName: string;
+    customerPhone: string;
+    areaId: number;
+    street: string;
+    typeId: number;
+    scheduledDate: string;
+    timeSlot: TimeSlot;
+    latitude?: number;
+    longitude?: number;
+  }) => { customerId: number; bookingId: number };
+  onUpdateBooking?: (bookingId: number, fields: Partial<Booking>) => void;
+  onDeleteBooking?: (bookingId: number) => void;
 }
 
 export const BookingsView: React.FC<BookingsViewProps> = ({
@@ -46,7 +63,10 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
   onAddCustomer,
   onAddAddress,
   onAddBooking,
-  onOpenDispatchForBooking
+  onOpenDispatchForBooking,
+  onCreateCustomerBookingAtomic,
+  onUpdateBooking,
+  onDeleteBooking
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | BookingStatus>('All');
@@ -56,6 +76,7 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
   // New Booking Wizard State
   const [customerMode, setCustomerMode] = useState<'existing' | 'new'>('existing');
   const [selectedCustomerId, setSelectedCustomerId] = useState<number>(customers[0]?.CustomerID || 1);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [newCustomerName, setNewCustomerName] = useState('');
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
 
@@ -71,10 +92,27 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
   const [timeSlot, setTimeSlot] = useState<TimeSlot>('09:00-12:00');
   const [wizardError, setWizardError] = useState<string | null>(null);
 
+  // Edit Booking Modal State
+  const [editingBooking, setEditingBooking] = useState<BookingDetailView | null>(null);
+  const [editDate, setEditDate] = useState('');
+  const [editSlot, setEditSlot] = useState<TimeSlot>('09:00-12:00');
+  const [editTypeId, setEditTypeId] = useState<number>(1);
+  const [editStatus, setEditStatus] = useState<BookingStatus>('Pending');
+  const [editError, setEditError] = useState<string | null>(null);
+
   // Customer's existing addresses
   const customerAddresses = useMemo(() => {
     return addresses.filter((a) => a.CustomerID === selectedCustomerId);
   }, [addresses, selectedCustomerId]);
+
+  // Filtered customer list for modal dropdown
+  const filteredModalCustomers = useMemo(() => {
+    if (!customerSearchQuery.trim()) return customers;
+    const q = customerSearchQuery.toLowerCase();
+    return customers.filter(
+      (c) => c.Name.toLowerCase().includes(q) || c.Phone.includes(q) || c.CustomerID.toString() === q
+    );
+  }, [customers, customerSearchQuery]);
 
   // Filtered Bookings
   const filteredBookings = useMemo(() => {
@@ -98,7 +136,6 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
     setWizardError(null);
 
     try {
-      let custId = selectedCustomerId;
       if (customerMode === 'new') {
         if (!newCustomerName.trim() || !newCustomerPhone.trim()) {
           setWizardError('Customer Name and 10-digit Phone are required.');
@@ -108,30 +145,95 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
           setWizardError('Customer phone must be exactly 10 digits.');
           return;
         }
-        custId = onAddCustomer(newCustomerName.trim(), newCustomerPhone.trim());
+        if (!newStreet.trim()) {
+          setWizardError('Street address is required for new customer.');
+          return;
+        }
+
+        if (onCreateCustomerBookingAtomic) {
+          onCreateCustomerBookingAtomic({
+            customerName: newCustomerName.trim(),
+            customerPhone: newCustomerPhone.trim(),
+            areaId: newAreaId,
+            street: newStreet.trim(),
+            typeId: selectedTypeId,
+            scheduledDate,
+            timeSlot
+          });
+        } else {
+          const res = onAddCustomer(newCustomerName.trim(), newCustomerPhone.trim());
+          const custId = typeof res === 'number' ? res : res.CustomerID;
+          const addrId = onAddAddress(custId, newAreaId, newStreet.trim(), 17.41, 78.47);
+          onAddBooking(addrId, selectedTypeId, scheduledDate, timeSlot);
+        }
+
+        setIsNewBookingModalOpen(false);
+        setNewCustomerName('');
+        setNewCustomerPhone('');
+        setNewStreet('');
+        return;
       }
 
+      // Existing Customer
       let addrId = selectedAddressId;
-      if (addressMode === 'new' || customerMode === 'new') {
+      if (addressMode === 'new' || customerAddresses.length === 0) {
         if (!newStreet.trim()) {
           setWizardError('Street address is required.');
           return;
         }
-        // Approximate coordinates in Hyderabad near selected area
         const baseLat = 17.4000 + (Math.random() - 0.5) * 0.015;
         const baseLng = 78.4850 + (Math.random() - 0.5) * 0.015;
-        addrId = onAddAddress(custId, newAreaId, newStreet.trim(), Number(baseLat.toFixed(6)), Number(baseLng.toFixed(6)));
+        addrId = onAddAddress(
+          selectedCustomerId,
+          newAreaId,
+          newStreet.trim(),
+          Number(baseLat.toFixed(6)),
+          Number(baseLng.toFixed(6))
+        );
       }
 
       onAddBooking(addrId, selectedTypeId, scheduledDate, timeSlot);
       setIsNewBookingModalOpen(false);
-
-      // Reset
       setNewCustomerName('');
       setNewCustomerPhone('');
       setNewStreet('');
     } catch (err: any) {
-      setWizardError(err.message);
+      setWizardError(err.message || 'Failed to create booking.');
+    }
+  };
+
+  const handleOpenEditBooking = (b: BookingDetailView) => {
+    setEditingBooking(b);
+    setEditDate(b.ScheduledDate);
+    setEditSlot(b.TimeSlot);
+    setEditStatus(b.BookingStatus);
+    setEditTypeId(b.TypeID || 1);
+    setEditError(null);
+  };
+
+  const handleSaveEditBooking = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingBooking || !onUpdateBooking) return;
+    try {
+      onUpdateBooking(editingBooking.BookingID, {
+        ScheduledDate: editDate,
+        TimeSlot: editSlot,
+        TypeID: editTypeId,
+        Status: editStatus
+      });
+      setEditingBooking(null);
+    } catch (err: any) {
+      setEditError(err.message || 'Failed to update booking.');
+    }
+  };
+
+  const handleDeleteBooking = (bookingId: number) => {
+    if (window.confirm(`Are you sure you want to delete Booking #${bookingId}? This will remove it from the system.`)) {
+      if (onDeleteBooking) {
+        onDeleteBooking(bookingId);
+      } else {
+        onCancelBooking(bookingId);
+      }
     }
   };
 
@@ -277,23 +379,14 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
                         <span className="text-slate-500 italic">Not dispatched</span>
                       )}
                     </td>
-                    <td className="py-3.5 px-4 text-right space-x-1.5">
+                    <td className="py-3.5 px-4 text-right space-x-1.5 whitespace-nowrap">
                       {b.BookingStatus === 'Pending' && (
-                        <>
-                          <button
-                            onClick={() => onOpenDispatchForBooking(b)}
-                            className="px-2.5 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-[11px] transition-colors"
-                          >
-                            Dispatch
-                          </button>
-                          <button
-                            onClick={() => onCancelBooking(b.BookingID)}
-                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-900/60 text-slate-300 hover:text-rose-200 font-medium text-[11px] transition-colors"
-                            title="Cancel Booking"
-                          >
-                            Cancel
-                          </button>
-                        </>
+                        <button
+                          onClick={() => onOpenDispatchForBooking(b)}
+                          className="px-2.5 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-[11px] transition-colors"
+                        >
+                          Dispatch
+                        </button>
                       )}
                       {b.BookingStatus === 'Assigned' && (
                         <button
@@ -304,6 +397,24 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
                           Abort
                         </button>
                       )}
+
+                      {/* Edit Booking button */}
+                      <button
+                        onClick={() => handleOpenEditBooking(b)}
+                        className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+                        title="Edit Booking"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+
+                      {/* Delete Booking button */}
+                      <button
+                        onClick={() => handleDeleteBooking(b.BookingID)}
+                        className="p-1 rounded-lg bg-slate-800 hover:bg-rose-950/60 text-slate-400 hover:text-rose-300 transition-colors"
+                        title="Delete Booking Record"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </td>
                   </tr>
                 ))
@@ -370,21 +481,44 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
                 </div>
 
                 {customerMode === 'existing' ? (
-                  <select
-                    value={selectedCustomerId}
-                    onChange={(e) => setSelectedCustomerId(Number(e.target.value))}
-                    className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-cyan-500"
-                  >
-                    {customers.map((c) => (
-                      <option key={c.CustomerID} value={c.CustomerID}>
-                        {c.Name} (+91 {c.Phone})
-                      </option>
-                    ))}
-                  </select>
+                  <div className="space-y-2">
+                    {/* Search box for customers */}
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="Search customer by name or phone..."
+                        value={customerSearchQuery}
+                        onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                        className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                      />
+                    </div>
+
+                    <select
+                      value={selectedCustomerId}
+                      onChange={(e) => {
+                        const cid = Number(e.target.value);
+                        setSelectedCustomerId(cid);
+                        const custAddrs = addresses.filter((a) => a.CustomerID === cid);
+                        if (custAddrs.length > 0) setSelectedAddressId(custAddrs[0].AddressID);
+                      }}
+                      className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-cyan-500"
+                    >
+                      {filteredModalCustomers.length === 0 ? (
+                        <option disabled>No customers match query</option>
+                      ) : (
+                        filteredModalCustomers.map((c) => (
+                          <option key={c.CustomerID} value={c.CustomerID}>
+                            {c.Name} (+91 {c.Phone})
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-slate-400 text-[10px] mb-1">Full Name</label>
+                      <label className="block text-slate-400 text-[10px] mb-1">Full Name *</label>
                       <input
                         type="text"
                         placeholder="e.g. Radhika Rao"
@@ -394,7 +528,7 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="block text-slate-400 text-[10px] mb-1">10-Digit Mobile</label>
+                      <label className="block text-slate-400 text-[10px] mb-1">10-Digit Mobile *</label>
                       <input
                         type="tel"
                         maxLength={10}
@@ -454,7 +588,7 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
                 ) : (
                   <div className="space-y-2">
                     <div>
-                      <label className="block text-slate-400 text-[10px] mb-1">Select Area Zone</label>
+                      <label className="block text-slate-400 text-[10px] mb-1">Select Area Zone *</label>
                       <select
                         value={newAreaId}
                         onChange={(e) => setNewAreaId(Number(e.target.value))}
@@ -468,7 +602,7 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
                       </select>
                     </div>
                     <div>
-                      <label className="block text-slate-400 text-[10px] mb-1">Street / House / Landmark</label>
+                      <label className="block text-slate-400 text-[10px] mb-1">Street / House / Landmark *</label>
                       <input
                         type="text"
                         placeholder="e.g. 5-11-20, Greenfield Road"
@@ -547,6 +681,111 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
                 >
                   <CheckCircle2 className="w-4 h-4" />
                   <span>Confirm Booking</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT BOOKING MODAL */}
+      {editingBooking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md p-6 shadow-2xl relative space-y-4">
+            <button
+              onClick={() => setEditingBooking(null)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div>
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Edit2 className="w-5 h-5 text-cyan-400" />
+                <span>Update Booking #{editingBooking.BookingID}</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Client: {editingBooking.CustomerName} • {editingBooking.Street}
+              </p>
+            </div>
+
+            {editError && (
+              <div className="p-3 rounded-xl bg-rose-950/50 border border-rose-800 text-rose-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{editError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveEditBooking} className="space-y-3.5 text-xs">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Scheduled Date</label>
+                  <input
+                    type="date"
+                    required
+                    value={editDate}
+                    onChange={(e) => setEditDate(e.target.value)}
+                    className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Time Slot</label>
+                  <select
+                    value={editSlot}
+                    onChange={(e) => setEditSlot(e.target.value as TimeSlot)}
+                    className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-cyan-500"
+                  >
+                    <option value="06:00-09:00">06:00 - 09:00 AM</option>
+                    <option value="09:00-12:00">09:00 - 12:00 PM</option>
+                    <option value="12:00-15:00">12:00 - 03:00 PM</option>
+                    <option value="15:00-18:00">03:00 - 06:00 PM</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">Tanker Capacity</label>
+                <select
+                  value={editTypeId}
+                  onChange={(e) => setEditTypeId(Number(e.target.value))}
+                  className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-cyan-500"
+                >
+                  {tankerTypes.map((tt) => (
+                    <option key={tt.TypeID} value={tt.TypeID}>
+                      {tt.Capacity_Liters.toLocaleString()} L - ₹{tt.Price}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">Booking Status</label>
+                <select
+                  value={editStatus}
+                  onChange={(e) => setEditStatus(e.target.value as BookingStatus)}
+                  className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-cyan-500"
+                >
+                  <option value="Pending">Pending</option>
+                  <option value="Assigned">Assigned</option>
+                  <option value="Delivered">Delivered</option>
+                  <option value="Cancelled">Cancelled</option>
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingBooking(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5 shadow-md shadow-cyan-600/20"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Update Booking</span>
                 </button>
               </div>
             </form>

@@ -298,65 +298,269 @@ export function useDatabase() {
 
   // Add Customer
   const addCustomer = useCallback((name: string, phone: string) => {
-    if (!/^\d{10}$/.test(phone)) {
+    const cleanPhone = phone.trim();
+    const cleanName = name.trim();
+    if (!cleanName) {
+      throw new Error('Customer name cannot be empty.');
+    }
+    if (!/^\d{10}$/.test(cleanPhone)) {
       throw new Error('Phone number must be exactly 10 digits.');
     }
-    let newId = 1;
+    const newId = db.customers.length > 0 ? Math.max(...db.customers.map((c) => c.CustomerID)) + 1 : 1;
+    if (db.customers.some((c) => c.Phone === cleanPhone)) {
+      throw new Error(`Customer with phone ${cleanPhone} already exists.`);
+    }
+    const newCust: Customer = { CustomerID: newId, Name: cleanName, Phone: cleanPhone };
+    setDb((prev) => ({
+      ...prev,
+      customers: [...prev.customers, newCust]
+    }));
+    return newCust;
+  }, [db.customers]);
+
+  // Update Customer
+  const updateCustomer = useCallback((customerId: number, updated: { Name?: string; Phone?: string }) => {
+    if (updated.Phone && !/^\d{10}$/.test(updated.Phone.trim())) {
+      throw new Error('Phone number must be exactly 10 digits.');
+    }
     setDb((prev) => {
-      if (prev.customers.some((c) => c.Phone === phone)) {
-        throw new Error(`Customer with phone ${phone} already exists.`);
+      if (updated.Phone && prev.customers.some((c) => c.CustomerID !== customerId && c.Phone === updated.Phone?.trim())) {
+        throw new Error(`Another customer with phone ${updated.Phone} already exists.`);
       }
-      newId = prev.customers.length > 0 ? Math.max(...prev.customers.map((c) => c.CustomerID)) + 1 : 1;
       return {
         ...prev,
-        customers: [...prev.customers, { CustomerID: newId, Name: name, Phone: phone }]
+        customers: prev.customers.map((c) =>
+          c.CustomerID === customerId
+            ? {
+                ...c,
+                Name: updated.Name !== undefined ? updated.Name.trim() : c.Name,
+                Phone: updated.Phone !== undefined ? updated.Phone.trim() : c.Phone
+              }
+            : c
+        )
       };
     });
-    return newId;
   }, []);
+
+  // Delete Customer (with cascade option)
+  const deleteCustomer = useCallback((customerId: number, cascade: boolean = false) => {
+    setDb((prev) => {
+      const hasAddr = prev.addresses.some((a) => a.CustomerID === customerId);
+      if (hasAddr && !cascade) {
+        throw new Error('Cannot delete Customer: referenced by records in ADDRESS table. Check "Cascade delete" to remove associated addresses and bookings.');
+      }
+
+      const addrIdsToDelete = prev.addresses.filter((a) => a.CustomerID === customerId).map((a) => a.AddressID);
+      const bookingIdsToDelete = prev.bookings.filter((b) => addrIdsToDelete.includes(b.AddressID)).map((b) => b.BookingID);
+
+      return {
+        ...prev,
+        customers: prev.customers.filter((c) => c.CustomerID !== customerId),
+        addresses: prev.addresses.filter((a) => a.CustomerID !== customerId),
+        bookings: prev.bookings.filter((b) => !bookingIdsToDelete.includes(b.BookingID)),
+        deliveries: prev.deliveries.filter((d) => !bookingIdsToDelete.includes(d.BookingID)),
+        payments: prev.payments.filter((p) => !bookingIdsToDelete.includes(p.BookingID))
+      };
+    });
+  }, []);
+
+  // Add Customer with initial Address
+  const addCustomerWithAddress = useCallback(
+    (name: string, phone: string, areaId: number, street: string, lat?: number, lng?: number) => {
+      const cleanName = name.trim();
+      const cleanPhone = phone.trim();
+      const cleanStreet = street.trim();
+      if (!cleanName) throw new Error('Customer name is required.');
+      if (!/^\d{10}$/.test(cleanPhone)) throw new Error('Phone number must be exactly 10 digits.');
+      if (!cleanStreet) throw new Error('Street address is required.');
+
+      let createdCust: Customer = { CustomerID: 1, Name: cleanName, Phone: cleanPhone };
+      let createdAddr: Address = { AddressID: 1, CustomerID: 1, AreaID: areaId, Street: cleanStreet, Latitude: 17.40, Longitude: 78.48 };
+
+      setDb((prev) => {
+        let cust = prev.customers.find((c) => c.Phone === cleanPhone);
+        let updatedCusts = prev.customers;
+        if (!cust) {
+          const newCustId = prev.customers.length > 0 ? Math.max(...prev.customers.map((c) => c.CustomerID)) + 1 : 1;
+          cust = { CustomerID: newCustId, Name: cleanName, Phone: cleanPhone };
+          updatedCusts = [...prev.customers, cust];
+        } else {
+          // If customer exists, update their name if provided
+          if (cleanName && cust.Name !== cleanName) {
+            cust = { ...cust, Name: cleanName };
+            updatedCusts = prev.customers.map((c) => (c.CustomerID === cust!.CustomerID ? cust! : c));
+          }
+        }
+        createdCust = cust;
+
+        const newAddrId = prev.addresses.length > 0 ? Math.max(...prev.addresses.map((a) => a.AddressID)) + 1 : 1;
+        const latitude = lat ?? Number((17.4000 + (Math.random() - 0.5) * 0.02).toFixed(6));
+        const longitude = lng ?? Number((78.4850 + (Math.random() - 0.5) * 0.02).toFixed(6));
+        createdAddr = {
+          AddressID: newAddrId,
+          CustomerID: cust.CustomerID,
+          AreaID: areaId,
+          Street: cleanStreet,
+          Latitude: latitude,
+          Longitude: longitude
+        };
+
+        return {
+          ...prev,
+          customers: updatedCusts,
+          addresses: [...prev.addresses, createdAddr]
+        };
+      });
+
+      return { customer: createdCust, address: createdAddr };
+    },
+    []
+  );
+
+  // Atomic creation of Customer, Address, and Booking
+  const createCustomerBookingAtomic = useCallback(
+    (params: {
+      customerName: string;
+      customerPhone: string;
+      areaId: number;
+      street: string;
+      typeId: number;
+      scheduledDate: string;
+      timeSlot: TimeSlot;
+      latitude?: number;
+      longitude?: number;
+    }) => {
+      const cleanName = params.customerName.trim();
+      const cleanPhone = params.customerPhone.trim();
+      const cleanStreet = params.street.trim();
+
+      if (!cleanName) throw new Error('Customer name is required.');
+      if (!/^\d{10}$/.test(cleanPhone)) throw new Error('Customer phone must be exactly 10 digits.');
+      if (!cleanStreet) throw new Error('Street address is required.');
+
+      let createdCustId = 0;
+      let createdBkId = 0;
+
+      setDb((prev) => {
+        let cust = prev.customers.find((c) => c.Phone === cleanPhone);
+        let updatedCusts = prev.customers;
+        if (!cust) {
+          const newCustId = prev.customers.length > 0 ? Math.max(...prev.customers.map((c) => c.CustomerID)) + 1 : 1;
+          cust = { CustomerID: newCustId, Name: cleanName, Phone: cleanPhone };
+          updatedCusts = [...prev.customers, cust];
+        } else if (cust.Name !== cleanName) {
+          cust = { ...cust, Name: cleanName };
+          updatedCusts = prev.customers.map((c) => (c.CustomerID === cust!.CustomerID ? cust! : c));
+        }
+        createdCustId = cust.CustomerID;
+
+        const newAddrId = prev.addresses.length > 0 ? Math.max(...prev.addresses.map((a) => a.AddressID)) + 1 : 1;
+        const lat = params.latitude ?? Number((17.4000 + (Math.random() - 0.5) * 0.02).toFixed(6));
+        const lng = params.longitude ?? Number((78.4850 + (Math.random() - 0.5) * 0.02).toFixed(6));
+        const newAddress: Address = {
+          AddressID: newAddrId,
+          CustomerID: cust.CustomerID,
+          AreaID: params.areaId,
+          Street: cleanStreet,
+          Latitude: lat,
+          Longitude: lng
+        };
+
+        const newBkId = prev.bookings.length > 0 ? Math.max(...prev.bookings.map((b) => b.BookingID)) + 1 : 1;
+        createdBkId = newBkId;
+        const newBooking: Booking = {
+          BookingID: newBkId,
+          AddressID: newAddrId,
+          TypeID: params.typeId,
+          ScheduledDate: params.scheduledDate,
+          TimeSlot: params.timeSlot,
+          Status: 'Pending'
+        };
+
+        return {
+          ...prev,
+          customers: updatedCusts,
+          addresses: [...prev.addresses, newAddress],
+          bookings: [newBooking, ...prev.bookings]
+        };
+      });
+
+      return { customerId: createdCustId, bookingId: createdBkId };
+    },
+    []
+  );
 
   // Add Address
   const addAddress = useCallback(
     (customerId: number, areaId: number, street: string, latitude: number, longitude: number) => {
-      let newId = 1;
-      setDb((prev) => {
-        newId = prev.addresses.length > 0 ? Math.max(...prev.addresses.map((a) => a.AddressID)) + 1 : 1;
-        return {
-          ...prev,
-          addresses: [
-            ...prev.addresses,
-            { AddressID: newId, CustomerID: customerId, AreaID: areaId, Street: street, Latitude: latitude, Longitude: longitude }
-          ]
-        };
-      });
+      const cleanStreet = street.trim();
+      if (!cleanStreet) throw new Error('Street address is required.');
+      const newId = db.addresses.length > 0 ? Math.max(...db.addresses.map((a) => a.AddressID)) + 1 : 1;
+      const newAddr: Address = {
+        AddressID: newId,
+        CustomerID: customerId,
+        AreaID: areaId,
+        Street: cleanStreet,
+        Latitude: latitude,
+        Longitude: longitude
+      };
+      setDb((prev) => ({
+        ...prev,
+        addresses: [...prev.addresses, newAddr]
+      }));
       return newId;
     },
-    []
+    [db.addresses]
   );
 
   // Add Booking
   const addBooking = useCallback(
     (addressId: number, typeId: number, scheduledDate: string, timeSlot: TimeSlot) => {
-      let newId = 1;
-      setDb((prev) => {
-        newId = prev.bookings.length > 0 ? Math.max(...prev.bookings.map((b) => b.BookingID)) + 1 : 1;
-        const newBooking: Booking = {
-          BookingID: newId,
-          AddressID: addressId,
-          TypeID: typeId,
-          ScheduledDate: scheduledDate,
-          TimeSlot: timeSlot,
-          Status: 'Pending'
-        };
-        return {
-          ...prev,
-          bookings: [newBooking, ...prev.bookings]
-        };
-      });
+      const newId = db.bookings.length > 0 ? Math.max(...db.bookings.map((b) => b.BookingID)) + 1 : 1;
+      const newBooking: Booking = {
+        BookingID: newId,
+        AddressID: addressId,
+        TypeID: typeId,
+        ScheduledDate: scheduledDate,
+        TimeSlot: timeSlot,
+        Status: 'Pending'
+      };
+      setDb((prev) => ({
+        ...prev,
+        bookings: [newBooking, ...prev.bookings]
+      }));
       return newId;
     },
-    []
+    [db.bookings]
   );
+
+  // Update Booking
+  const updateBooking = useCallback((bookingId: number, fields: Partial<Booking>) => {
+    setDb((prev) => ({
+      ...prev,
+      bookings: prev.bookings.map((b) => (b.BookingID === bookingId ? { ...b, ...fields } : b))
+    }));
+  }, []);
+
+  // Delete Booking
+  const deleteBooking = useCallback((bookingId: number) => {
+    setDb((prev) => {
+      const activeDelivery = prev.deliveries.find((d) => d.BookingID === bookingId && d.DeliveredTime === null);
+      let updatedTankers = prev.tankers;
+      if (activeDelivery) {
+        updatedTankers = prev.tankers.map((t) =>
+          t.TankerID === activeDelivery.TankerID ? { ...t, Status: 'Available' as TankerStatus } : t
+        );
+      }
+      return {
+        ...prev,
+        bookings: prev.bookings.filter((b) => b.BookingID !== bookingId),
+        deliveries: prev.deliveries.filter((d) => d.BookingID !== bookingId),
+        payments: prev.payments.filter((p) => p.BookingID !== bookingId),
+        tankers: updatedTankers
+      };
+    });
+  }, []);
 
   // Cancel Booking
   const cancelBooking = useCallback((bookingId: number) => {
@@ -456,6 +660,41 @@ export function useDatabase() {
     });
   }, []);
 
+  // Generic Table Row Insertion (for Database Editor and Studio)
+  const insertTableRow = useCallback((tableName: keyof DatabaseState, record: any) => {
+    setDb((prev) => {
+      const list = prev[tableName] as any[];
+      let idKey = '';
+      switch (tableName) {
+        case 'customers': idKey = 'CustomerID'; break;
+        case 'areas': idKey = 'AreaID'; break;
+        case 'addresses': idKey = 'AddressID'; break;
+        case 'tankerTypes': idKey = 'TypeID'; break;
+        case 'tankers': idKey = 'TankerID'; break;
+        case 'drivers': idKey = 'DriverID'; break;
+        case 'bookings': idKey = 'BookingID'; break;
+        case 'deliveries': idKey = 'DeliveryID'; break;
+        case 'payments': idKey = 'PaymentID'; break;
+      }
+
+      let newId = record[idKey];
+      if (newId === undefined || newId === null || newId === '' || isNaN(Number(newId))) {
+        newId = list.length > 0 ? Math.max(...list.map((item) => Number(item[idKey]) || 0)) + 1 : 1;
+      } else {
+        newId = Number(newId);
+        if (list.some((item) => item[idKey] === newId)) {
+          throw new Error(`Record with ${idKey} = ${newId} already exists in ${tableName}.`);
+        }
+      }
+
+      const formattedRecord = { ...record, [idKey]: newId };
+      return {
+        ...prev,
+        [tableName]: [formattedRecord, ...list]
+      };
+    });
+  }, []);
+
   // Export current database state as standard SQL dump
   const generateSQLDump = useCallback(() => {
     let sql = `-- =====================================================================\n`;
@@ -536,10 +775,17 @@ export function useDatabase() {
     addTanker,
     addDriver,
     addCustomer,
+    updateCustomer,
+    deleteCustomer,
+    addCustomerWithAddress,
+    createCustomerBookingAtomic,
     addAddress,
     addBooking,
+    updateBooking,
+    deleteBooking,
     cancelBooking,
     recordPayment,
+    insertTableRow,
     updateTableRow,
     deleteTableRow,
     generateSQLDump,

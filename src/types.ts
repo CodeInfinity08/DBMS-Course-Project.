@@ -120,4 +120,4 @@ export interface DriverTelemetry {
   status: 'en_route_delivery' | 'delivering_discharge' | 'returning_depot' | 'idle';
 }
 
-export type ActiveNavTab = 'dashboard' | 'deliveries' | 'livemap' | 'fleet' | 'bookings' | 'database' | 'analytics';
+export type ActiveNavTab = 'dashboard' | 'deliveries' | 'livemap' | 'fleet' | 'bookings' | 'customers' | 'database' | 'analytics';

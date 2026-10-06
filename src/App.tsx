@@ -13,11 +13,12 @@ import { LiveMap } from './components/LiveMap.tsx';
 import { ActiveDeliveries } from './components/ActiveDeliveries.tsx';
 import { FleetInventory } from './components/FleetInventory.tsx';
 import { BookingsView } from './components/BookingsView.tsx';
+import { CustomersView } from './components/CustomersView.tsx';
 import { DatabaseEditor } from './components/DatabaseEditor.tsx';
 import { AnalyticsView } from './components/AnalyticsView.tsx';
 import { ToastNotificationContainer, DeliveryToast } from './components/ToastNotification.tsx';
 import { ActiveNavTab, BookingDetailView, PaymentMethod, TankerStatus, TimeSlot } from './types.ts';
-import { Truck, X, AlertCircle, Send, CheckCircle2, Calendar } from 'lucide-react';
+import { Truck, X, AlertCircle, Send, CheckCircle2, Calendar, Search, Users, Plus } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveNavTab>('dashboard');
@@ -37,10 +38,17 @@ export default function App() {
     addTanker,
     addDriver,
     addCustomer,
+    updateCustomer,
+    deleteCustomer,
+    addCustomerWithAddress,
+    createCustomerBookingAtomic,
     addAddress,
     addBooking,
+    updateBooking,
+    deleteBooking,
     cancelBooking,
     recordPayment,
+    insertTableRow,
     updateTableRow,
     deleteTableRow,
     generateSQLDump
@@ -148,7 +156,15 @@ export default function App() {
 
   // Global Quick Booking Modal
   const [isQuickBookingOpen, setIsQuickBookingOpen] = useState(false);
+  const [quickCustomerMode, setQuickCustomerMode] = useState<'existing' | 'new'>('existing');
+  const [quickCustomerSearch, setQuickCustomerSearch] = useState('');
   const [quickCustId, setQuickCustId] = useState<number>(1);
+  const [quickNewCustName, setQuickNewCustName] = useState('');
+  const [quickNewCustPhone, setQuickNewCustPhone] = useState('');
+  const [quickNewAreaId, setQuickNewAreaId] = useState<number>(1);
+  const [quickNewStreet, setQuickNewStreet] = useState('');
+  const [quickBookingError, setQuickBookingError] = useState<string | null>(null);
+
   const [quickAddrId, setQuickAddrId] = useState<number>(1);
   const [quickTypeId, setQuickTypeId] = useState<number>(2);
   const [quickDate, setQuickDate] = useState<string>(
@@ -332,6 +348,31 @@ export default function App() {
             onAddAddress={addAddress}
             onAddBooking={addBooking}
             onOpenDispatchForBooking={handleOpenDispatchForBooking}
+            onCreateCustomerBookingAtomic={createCustomerBookingAtomic}
+            onUpdateBooking={updateBooking}
+            onDeleteBooking={deleteBooking}
+          />
+        )}
+
+        {activeTab === 'customers' && (
+          <CustomersView
+            customers={db.customers}
+            addresses={db.addresses}
+            areas={db.areas}
+            bookings={db.bookings}
+            bookingDetails={bookingDetailsView}
+            tankerTypes={db.tankerTypes}
+            onAddCustomer={addCustomer}
+            onAddCustomerWithAddress={addCustomerWithAddress}
+            onUpdateCustomer={updateCustomer}
+            onDeleteCustomer={deleteCustomer}
+            onBookForCustomer={(customerId) => {
+              setQuickCustomerMode('existing');
+              setQuickCustId(customerId);
+              const matchingAddr = db.addresses.find((a) => a.CustomerID === customerId);
+              if (matchingAddr) setQuickAddrId(matchingAddr.AddressID);
+              setIsQuickBookingOpen(true);
+            }}
           />
         )}
 
@@ -339,6 +380,7 @@ export default function App() {
           <DatabaseEditor
             db={db}
             bookingDetailsView={bookingDetailsView}
+            insertTableRow={insertTableRow}
             updateTableRow={updateTableRow}
             deleteTableRow={deleteTableRow}
             resetDatabase={resetDatabase}
@@ -564,63 +606,226 @@ export default function App() {
             </button>
 
             <div>
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Calendar className="w-5 h-5 text-cyan-400" />
+              <div className="flex items-center gap-2 text-cyan-400 text-xs font-mono uppercase tracking-wider">
+                <Calendar className="w-4 h-4" />
                 <span>Quick Booking Schedule</span>
-              </h3>
+              </div>
+              <h3 className="text-base font-bold text-white mt-1">Book Water Tanker</h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Assign a tanker delivery request to an existing customer and address.
+                Select an existing customer or register a new customer with delivery location.
               </p>
+            </div>
+
+            {quickBookingError && (
+              <div className="p-3 rounded-xl bg-rose-950/50 border border-rose-800 text-rose-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{quickBookingError}</span>
+              </div>
+            )}
+
+            {/* Mode Switcher */}
+            <div className="flex p-0.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-medium">
+              <button
+                type="button"
+                onClick={() => {
+                  setQuickCustomerMode('existing');
+                  setQuickBookingError(null);
+                }}
+                className={`flex-1 py-1.5 rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                  quickCustomerMode === 'existing'
+                    ? 'bg-cyan-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Existing Customer</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setQuickCustomerMode('new');
+                  setQuickBookingError(null);
+                }}
+                className={`flex-1 py-1.5 rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                  quickCustomerMode === 'new'
+                    ? 'bg-cyan-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>+ New Customer</span>
+              </button>
             </div>
 
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                addBooking(quickAddrId, quickTypeId, quickDate, quickSlot);
-                setIsQuickBookingOpen(false);
-                if (soundEnabled) playChime('click');
+                setQuickBookingError(null);
+
+                try {
+                  if (quickCustomerMode === 'new') {
+                    if (!quickNewCustName.trim()) {
+                      setQuickBookingError('Customer name is required.');
+                      return;
+                    }
+                    if (!/^\d{10}$/.test(quickNewCustPhone.trim())) {
+                      setQuickBookingError('Mobile phone must be exactly 10 digits.');
+                      return;
+                    }
+                    if (!quickNewStreet.trim()) {
+                      setQuickBookingError('Street address is required.');
+                      return;
+                    }
+
+                    createCustomerBookingAtomic({
+                      customerName: quickNewCustName.trim(),
+                      customerPhone: quickNewCustPhone.trim(),
+                      areaId: quickNewAreaId,
+                      street: quickNewStreet.trim(),
+                      typeId: quickTypeId,
+                      scheduledDate: quickDate,
+                      timeSlot: quickSlot
+                    });
+
+                    setQuickNewCustName('');
+                    setQuickNewCustPhone('');
+                    setQuickNewStreet('');
+                  } else {
+                    if (!quickAddrId) {
+                      setQuickBookingError('Please select a delivery address for the customer.');
+                      return;
+                    }
+                    addBooking(quickAddrId, quickTypeId, quickDate, quickSlot);
+                  }
+
+                  setIsQuickBookingOpen(false);
+                  if (soundEnabled) playChime('click');
+                } catch (err: any) {
+                  setQuickBookingError(err.message || 'Failed to create booking.');
+                }
               }}
               className="space-y-3.5 text-xs"
             >
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Customer</label>
-                <select
-                  value={quickCustId}
-                  onChange={(e) => {
-                    const cid = Number(e.target.value);
-                    setQuickCustId(cid);
-                    const matchingAddr = db.addresses.find((a) => a.CustomerID === cid);
-                    if (matchingAddr) setQuickAddrId(matchingAddr.AddressID);
-                  }}
-                  className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-cyan-500"
-                >
-                  {db.customers.map((c) => (
-                    <option key={c.CustomerID} value={c.CustomerID}>
-                      {c.Name} (+91 {c.Phone})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* Existing Customer Selector */}
+              {quickCustomerMode === 'existing' ? (
+                <>
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">Select Customer</label>
+                    <div className="space-y-1.5">
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          placeholder="Filter customers by name or phone..."
+                          value={quickCustomerSearch}
+                          onChange={(e) => setQuickCustomerSearch(e.target.value)}
+                          className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 text-xs"
+                        />
+                      </div>
 
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Delivery Address</label>
-                <select
-                  value={quickAddrId}
-                  onChange={(e) => setQuickAddrId(Number(e.target.value))}
-                  className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-cyan-500"
-                >
-                  {db.addresses
-                    .filter((a) => a.CustomerID === quickCustId)
-                    .map((a) => {
-                      const area = db.areas.find((ar) => ar.AreaID === a.AreaID);
-                      return (
-                        <option key={a.AddressID} value={a.AddressID}>
-                          {a.Street}, {area?.AreaName}
+                      <select
+                        value={quickCustId}
+                        onChange={(e) => {
+                          const cid = Number(e.target.value);
+                          setQuickCustId(cid);
+                          const matchingAddr = db.addresses.find((a) => a.CustomerID === cid);
+                          if (matchingAddr) setQuickAddrId(matchingAddr.AddressID);
+                        }}
+                        className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-cyan-500"
+                      >
+                        {db.customers
+                          .filter((c) => {
+                            if (!quickCustomerSearch.trim()) return true;
+                            const q = quickCustomerSearch.toLowerCase();
+                            return c.Name.toLowerCase().includes(q) || c.Phone.includes(q);
+                          })
+                          .map((c) => (
+                            <option key={c.CustomerID} value={c.CustomerID}>
+                              {c.Name} (+91 {c.Phone})
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">Delivery Address</label>
+                    <select
+                      value={quickAddrId}
+                      onChange={(e) => setQuickAddrId(Number(e.target.value))}
+                      className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-cyan-500"
+                    >
+                      {db.addresses.filter((a) => a.CustomerID === quickCustId).length === 0 ? (
+                        <option disabled value="">No address found for this client</option>
+                      ) : (
+                        db.addresses
+                          .filter((a) => a.CustomerID === quickCustId)
+                          .map((a) => {
+                            const area = db.areas.find((ar) => ar.AreaID === a.AreaID);
+                            return (
+                              <option key={a.AddressID} value={a.AddressID}>
+                                {a.Street}, {area?.AreaName}
+                              </option>
+                            );
+                          })
+                      )}
+                    </select>
+                  </div>
+                </>
+              ) : (
+                /* New Customer Registration Fields */
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-slate-400 text-[10px] mb-1">Full Name *</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Arvind Rao"
+                        value={quickNewCustName}
+                        onChange={(e) => setQuickNewCustName(e.target.value)}
+                        className="w-full p-2 rounded-lg bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-cyan-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 text-[10px] mb-1">10-Digit Mobile *</label>
+                      <input
+                        type="tel"
+                        maxLength={10}
+                        placeholder="9876543210"
+                        value={quickNewCustPhone}
+                        onChange={(e) => setQuickNewCustPhone(e.target.value.replace(/\D/g, ''))}
+                        className="w-full p-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono focus:outline-none focus:border-cyan-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 text-[10px] mb-1">Delivery Area *</label>
+                    <select
+                      value={quickNewAreaId}
+                      onChange={(e) => setQuickNewAreaId(Number(e.target.value))}
+                      className="w-full p-2 rounded-lg bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-cyan-500"
+                    >
+                      {db.areas.map((ar) => (
+                        <option key={ar.AreaID} value={ar.AreaID}>
+                          {ar.AreaName} (PIN {ar.Pincode})
                         </option>
-                      );
-                    })}
-                </select>
-              </div>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 text-[10px] mb-1">Street Address *</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Flat 104, Sai Residency, Main Road"
+                      value={quickNewStreet}
+                      onChange={(e) => setQuickNewStreet(e.target.value)}
+                      className="w-full p-2 rounded-lg bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-slate-300 font-medium mb-1">Tanker Capacity</label>
@@ -673,16 +878,16 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setIsQuickBookingOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium"
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold flex items-center gap-1.5 shadow-md shadow-cyan-600/20"
+                  className="px-5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md shadow-cyan-600/20"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Create Booking</span>
+                  <span>{quickCustomerMode === 'new' ? 'Register & Book' : 'Confirm Booking'}</span>
                 </button>
               </div>
             </form>
