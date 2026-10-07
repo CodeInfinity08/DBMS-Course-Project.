@@ -99,18 +99,18 @@ export function useDatabase() {
   // Compute view `vw_booking_details`
   const bookingDetailsView = useMemo<BookingDetailView[]>(() => {
     return db.bookings.map((b) => {
-      const addr = db.addresses.find((a) => a.AddressID === b.AddressID);
-      const cust = addr ? db.customers.find((c) => c.CustomerID === addr.CustomerID) : undefined;
-      const area = addr ? db.areas.find((ar) => ar.AreaID === addr.AreaID) : undefined;
-      const ttype = db.tankerTypes.find((tt) => tt.TypeID === b.TypeID);
-      const delivery = db.deliveries.find((d) => d.BookingID === b.BookingID);
-      const tanker = delivery ? db.tankers.find((t) => t.TankerID === delivery.TankerID) : undefined;
-      const driver = delivery ? db.drivers.find((dr) => dr.DriverID === delivery.DriverID) : undefined;
-      const payment = db.payments.find((p) => p.BookingID === b.BookingID);
+      const addr = db.addresses.find((a) => Number(a.AddressID) === Number(b.AddressID));
+      const cust = addr ? db.customers.find((c) => Number(c.CustomerID) === Number(addr.CustomerID)) : undefined;
+      const area = addr ? db.areas.find((ar) => Number(ar.AreaID) === Number(addr.AreaID)) : undefined;
+      const ttype = db.tankerTypes.find((tt) => Number(tt.TypeID) === Number(b.TypeID));
+      const delivery = db.deliveries.find((d) => Number(d.BookingID) === Number(b.BookingID));
+      const tanker = delivery ? db.tankers.find((t) => Number(t.TankerID) === Number(delivery.TankerID)) : undefined;
+      const driver = delivery ? db.drivers.find((dr) => Number(dr.DriverID) === Number(delivery.DriverID)) : undefined;
+      const payment = db.payments.find((p) => Number(p.BookingID) === Number(b.BookingID));
 
       return {
-        BookingID: b.BookingID,
-        CustomerID: cust?.CustomerID || 0,
+        BookingID: Number(b.BookingID),
+        CustomerID: cust ? Number(cust.CustomerID) : 0,
         CustomerName: cust?.Name || 'Unknown Customer',
         CustomerPhone: cust?.Phone || '0000000000',
         Street: addr?.Street || 'Unknown Street',
@@ -121,7 +121,7 @@ export function useDatabase() {
         ScheduledDate: b.ScheduledDate,
         TimeSlot: b.TimeSlot,
         BookingStatus: b.Status,
-        DeliveryID: delivery?.DeliveryID ?? null,
+        DeliveryID: delivery ? Number(delivery.DeliveryID) : null,
         License_Plate: tanker?.License_Plate ?? null,
         DriverName: driver?.Name ?? null,
         DriverPhone: driver?.Phone ?? null,
@@ -131,10 +131,10 @@ export function useDatabase() {
         PaymentMethod: payment?.Method ?? null,
         Latitude: addr?.Latitude,
         Longitude: addr?.Longitude,
-        AddressID: b.AddressID,
-        TankerID: tanker?.TankerID,
-        DriverID: driver?.DriverID,
-        TypeID: b.TypeID
+        AddressID: Number(b.AddressID),
+        TankerID: tanker ? Number(tanker.TankerID) : undefined,
+        DriverID: driver ? Number(driver.DriverID) : undefined,
+        TypeID: Number(b.TypeID)
       };
     });
   }, [db]);
@@ -454,24 +454,24 @@ export function useDatabase() {
         }
         createdCustId = cust.CustomerID;
 
-        const newAddrId = prev.addresses.length > 0 ? Math.max(...prev.addresses.map((a) => a.AddressID)) + 1 : 1;
+        const newAddrId = prev.addresses.length > 0 ? Math.max(...prev.addresses.map((a) => Number(a.AddressID) || 0)) + 1 : 1;
         const lat = params.latitude ?? Number((17.4000 + (Math.random() - 0.5) * 0.02).toFixed(6));
         const lng = params.longitude ?? Number((78.4850 + (Math.random() - 0.5) * 0.02).toFixed(6));
         const newAddress: Address = {
-          AddressID: newAddrId,
-          CustomerID: cust.CustomerID,
-          AreaID: params.areaId,
+          AddressID: Number(newAddrId),
+          CustomerID: Number(cust.CustomerID),
+          AreaID: Number(params.areaId),
           Street: cleanStreet,
           Latitude: lat,
           Longitude: lng
         };
 
-        const newBkId = prev.bookings.length > 0 ? Math.max(...prev.bookings.map((b) => b.BookingID)) + 1 : 1;
+        const newBkId = prev.bookings.length > 0 ? Math.max(...prev.bookings.map((b) => Number(b.BookingID) || 0)) + 1 : 1;
         createdBkId = newBkId;
         const newBooking: Booking = {
-          BookingID: newBkId,
-          AddressID: newAddrId,
-          TypeID: params.typeId,
+          BookingID: Number(newBkId),
+          AddressID: Number(newAddrId),
+          TypeID: Number(params.typeId),
           ScheduledDate: params.scheduledDate,
           TimeSlot: params.timeSlot,
           Status: 'Pending'
@@ -516,47 +516,119 @@ export function useDatabase() {
   // Add Booking
   const addBooking = useCallback(
     (addressId: number, typeId: number, scheduledDate: string, timeSlot: TimeSlot) => {
-      const newId = db.bookings.length > 0 ? Math.max(...db.bookings.map((b) => b.BookingID)) + 1 : 1;
-      const newBooking: Booking = {
-        BookingID: newId,
-        AddressID: addressId,
-        TypeID: typeId,
-        ScheduledDate: scheduledDate,
-        TimeSlot: timeSlot,
-        Status: 'Pending'
-      };
-      setDb((prev) => ({
-        ...prev,
-        bookings: [newBooking, ...prev.bookings]
-      }));
-      return newId;
+      let createdId = 0;
+      setDb((prev) => {
+        const newId = prev.bookings.length > 0 ? Math.max(...prev.bookings.map((b) => Number(b.BookingID) || 0)) + 1 : 1;
+        createdId = newId;
+        const newBooking: Booking = {
+          BookingID: Number(newId),
+          AddressID: Number(addressId),
+          TypeID: Number(typeId),
+          ScheduledDate: scheduledDate,
+          TimeSlot: timeSlot,
+          Status: 'Pending'
+        };
+        return {
+          ...prev,
+          bookings: [newBooking, ...prev.bookings]
+        };
+      });
+      return createdId;
     },
-    [db.bookings]
+    []
+  );
+
+  // Atomic booking creation for a customer (handles existing address or new address gracefully)
+  const createBookingForCustomer = useCallback(
+    (params: {
+      customerId: number;
+      addressId?: number | null;
+      areaId?: number;
+      street?: string;
+      typeId: number;
+      scheduledDate: string;
+      timeSlot: TimeSlot;
+      latitude?: number;
+      longitude?: number;
+    }) => {
+      setDb((prev) => {
+        const customer = prev.customers.find((c) => Number(c.CustomerID) === Number(params.customerId));
+        if (!customer) {
+          throw new Error(`Customer ID ${params.customerId} not found.`);
+        }
+
+        let targetAddressId = params.addressId ? Number(params.addressId) : null;
+        let updatedAddresses = prev.addresses;
+
+        // If no addressId provided, or addressId doesn't belong to this customer, or new street provided
+        const addressExists = targetAddressId
+          ? prev.addresses.some((a) => Number(a.AddressID) === targetAddressId && Number(a.CustomerID) === Number(params.customerId))
+          : false;
+
+        if (!addressExists) {
+          const cleanStreet = (params.street || '').trim();
+          if (!cleanStreet) {
+            throw new Error('Please enter a delivery street address for this customer.');
+          }
+          const chosenAreaId = params.areaId ? Number(params.areaId) : (prev.areas[0]?.AreaID || 1);
+          const newAddrId = prev.addresses.length > 0 ? Math.max(...prev.addresses.map((a) => Number(a.AddressID) || 0)) + 1 : 1;
+          const lat = params.latitude ?? Number((17.4000 + (Math.random() - 0.5) * 0.02).toFixed(6));
+          const lng = params.longitude ?? Number((78.4850 + (Math.random() - 0.5) * 0.02).toFixed(6));
+          const newAddress: Address = {
+            AddressID: Number(newAddrId),
+            CustomerID: Number(customer.CustomerID),
+            AreaID: Number(chosenAreaId),
+            Street: cleanStreet,
+            Latitude: lat,
+            Longitude: lng
+          };
+          updatedAddresses = [...prev.addresses, newAddress];
+          targetAddressId = Number(newAddrId);
+        }
+
+        const newBkId = prev.bookings.length > 0 ? Math.max(...prev.bookings.map((b) => Number(b.BookingID) || 0)) + 1 : 1;
+        const newBooking: Booking = {
+          BookingID: Number(newBkId),
+          AddressID: Number(targetAddressId!),
+          TypeID: Number(params.typeId),
+          ScheduledDate: params.scheduledDate,
+          TimeSlot: params.timeSlot,
+          Status: 'Pending'
+        };
+
+        return {
+          ...prev,
+          addresses: updatedAddresses,
+          bookings: [newBooking, ...prev.bookings]
+        };
+      });
+    },
+    []
   );
 
   // Update Booking
   const updateBooking = useCallback((bookingId: number, fields: Partial<Booking>) => {
     setDb((prev) => ({
       ...prev,
-      bookings: prev.bookings.map((b) => (b.BookingID === bookingId ? { ...b, ...fields } : b))
+      bookings: prev.bookings.map((b) => (Number(b.BookingID) === Number(bookingId) ? { ...b, ...fields } : b))
     }));
   }, []);
 
-  // Delete Booking
+  // Delete Booking (Cascade cleanup of deliveries and payments, frees up tanker)
   const deleteBooking = useCallback((bookingId: number) => {
     setDb((prev) => {
-      const activeDelivery = prev.deliveries.find((d) => d.BookingID === bookingId && d.DeliveredTime === null);
+      const activeDelivery = prev.deliveries.find((d) => Number(d.BookingID) === Number(bookingId) && d.DeliveredTime === null);
       let updatedTankers = prev.tankers;
       if (activeDelivery) {
         updatedTankers = prev.tankers.map((t) =>
-          t.TankerID === activeDelivery.TankerID ? { ...t, Status: 'Available' as TankerStatus } : t
+          Number(t.TankerID) === Number(activeDelivery.TankerID) ? { ...t, Status: 'Available' as TankerStatus } : t
         );
       }
       return {
         ...prev,
-        bookings: prev.bookings.filter((b) => b.BookingID !== bookingId),
-        deliveries: prev.deliveries.filter((d) => d.BookingID !== bookingId),
-        payments: prev.payments.filter((p) => p.BookingID !== bookingId),
+        bookings: prev.bookings.filter((b) => Number(b.BookingID) !== Number(bookingId)),
+        deliveries: prev.deliveries.filter((d) => Number(d.BookingID) !== Number(bookingId)),
+        payments: prev.payments.filter((p) => Number(p.BookingID) !== Number(bookingId)),
         tankers: updatedTankers
       };
     });
@@ -647,15 +719,26 @@ export function useDatabase() {
         if (hasDel) throw new Error('Cannot delete Driver: referenced in DELIVERY table.');
       }
       if (tableName === 'bookings') {
-        const hasDel = prev.deliveries.some((d) => d.BookingID === idVal);
-        const hasPay = prev.payments.some((p) => p.BookingID === idVal);
-        if (hasDel || hasPay) throw new Error('Cannot delete Booking: referenced in DELIVERY or PAYMENT tables.');
+        const activeDelivery = prev.deliveries.find((d) => Number(d.BookingID) === Number(idVal) && d.DeliveredTime === null);
+        let updatedTankers = prev.tankers;
+        if (activeDelivery) {
+          updatedTankers = prev.tankers.map((t) =>
+            Number(t.TankerID) === Number(activeDelivery.TankerID) ? { ...t, Status: 'Available' as TankerStatus } : t
+          );
+        }
+        return {
+          ...prev,
+          bookings: prev.bookings.filter((b) => Number(b.BookingID) !== Number(idVal)),
+          deliveries: prev.deliveries.filter((d) => Number(d.BookingID) !== Number(idVal)),
+          payments: prev.payments.filter((p) => Number(p.BookingID) !== Number(idVal)),
+          tankers: updatedTankers
+        };
       }
 
       const list = prev[tableName] as any[];
       return {
         ...prev,
-        [tableName]: list.filter((item) => item[idKey] !== idVal)
+        [tableName]: list.filter((item) => String(item[idKey]) !== String(idVal) && Number(item[idKey]) !== Number(idVal))
       };
     });
   }, []);
@@ -779,6 +862,7 @@ export function useDatabase() {
     deleteCustomer,
     addCustomerWithAddress,
     createCustomerBookingAtomic,
+    createBookingForCustomer,
     addAddress,
     addBooking,
     updateBooking,

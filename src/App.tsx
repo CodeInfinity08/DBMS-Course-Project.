@@ -42,6 +42,7 @@ export default function App() {
     deleteCustomer,
     addCustomerWithAddress,
     createCustomerBookingAtomic,
+    createBookingForCustomer,
     addAddress,
     addBooking,
     updateBooking,
@@ -165,6 +166,7 @@ export default function App() {
   const [quickNewStreet, setQuickNewStreet] = useState('');
   const [quickBookingError, setQuickBookingError] = useState<string | null>(null);
 
+  const [quickAddressSubMode, setQuickAddressSubMode] = useState<'saved' | 'new'>('saved');
   const [quickAddrId, setQuickAddrId] = useState<number>(1);
   const [quickTypeId, setQuickTypeId] = useState<number>(2);
   const [quickDate, setQuickDate] = useState<string>(
@@ -285,6 +287,8 @@ export default function App() {
             onOpenDispatch={handleOpenGeneralDispatch}
             onOpenNewBooking={() => setIsQuickBookingOpen(true)}
             onCompleteDelivery={handleCompleteDelivery}
+            onOpenDispatchForBooking={handleOpenDispatchForBooking}
+            onDeleteBooking={deleteBooking}
           />
         )}
 
@@ -349,6 +353,7 @@ export default function App() {
             onAddBooking={addBooking}
             onOpenDispatchForBooking={handleOpenDispatchForBooking}
             onCreateCustomerBookingAtomic={createCustomerBookingAtomic}
+            createBookingForCustomer={createBookingForCustomer}
             onUpdateBooking={updateBooking}
             onDeleteBooking={deleteBooking}
           />
@@ -369,8 +374,14 @@ export default function App() {
             onBookForCustomer={(customerId) => {
               setQuickCustomerMode('existing');
               setQuickCustId(customerId);
-              const matchingAddr = db.addresses.find((a) => a.CustomerID === customerId);
-              if (matchingAddr) setQuickAddrId(matchingAddr.AddressID);
+              const matchingAddrs = db.addresses.filter((a) => Number(a.CustomerID) === Number(customerId));
+              if (matchingAddrs.length > 0) {
+                setQuickAddrId(matchingAddrs[0].AddressID);
+                setQuickAddressSubMode('saved');
+              } else {
+                setQuickAddrId(0);
+                setQuickAddressSubMode('new');
+              }
               setIsQuickBookingOpen(true);
             }}
           />
@@ -691,11 +702,30 @@ export default function App() {
                     setQuickNewCustPhone('');
                     setQuickNewStreet('');
                   } else {
-                    if (!quickAddrId) {
-                      setQuickBookingError('Please select a delivery address for the customer.');
-                      return;
+                    const custAddrs = db.addresses.filter((a) => Number(a.CustomerID) === Number(quickCustId));
+                    if (quickAddressSubMode === 'new' || custAddrs.length === 0) {
+                      if (!quickNewStreet.trim()) {
+                        setQuickBookingError('Please enter a delivery street address for this customer.');
+                        return;
+                      }
+                    } else {
+                      if (!quickAddrId) {
+                        setQuickBookingError('Please select a delivery address for the customer.');
+                        return;
+                      }
                     }
-                    addBooking(quickAddrId, quickTypeId, quickDate, quickSlot);
+
+                    createBookingForCustomer({
+                      customerId: quickCustId,
+                      addressId: (quickAddressSubMode === 'new' || custAddrs.length === 0) ? null : quickAddrId,
+                      areaId: quickNewAreaId,
+                      street: quickNewStreet.trim(),
+                      typeId: quickTypeId,
+                      scheduledDate: quickDate,
+                      timeSlot: quickSlot
+                    });
+
+                    setQuickNewStreet('');
                   }
 
                   setIsQuickBookingOpen(false);
@@ -728,8 +758,14 @@ export default function App() {
                         onChange={(e) => {
                           const cid = Number(e.target.value);
                           setQuickCustId(cid);
-                          const matchingAddr = db.addresses.find((a) => a.CustomerID === cid);
-                          if (matchingAddr) setQuickAddrId(matchingAddr.AddressID);
+                          const matchingAddrs = db.addresses.filter((a) => Number(a.CustomerID) === cid);
+                          if (matchingAddrs.length > 0) {
+                            setQuickAddrId(matchingAddrs[0].AddressID);
+                            setQuickAddressSubMode('saved');
+                          } else {
+                            setQuickAddrId(0);
+                            setQuickAddressSubMode('new');
+                          }
                         }}
                         className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-cyan-500"
                       >
@@ -749,27 +785,83 @@ export default function App() {
                   </div>
 
                   <div>
-                    <label className="block text-slate-300 font-medium mb-1">Delivery Address</label>
-                    <select
-                      value={quickAddrId}
-                      onChange={(e) => setQuickAddrId(Number(e.target.value))}
-                      className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-cyan-500"
-                    >
-                      {db.addresses.filter((a) => a.CustomerID === quickCustId).length === 0 ? (
-                        <option disabled value="">No address found for this client</option>
-                      ) : (
-                        db.addresses
-                          .filter((a) => a.CustomerID === quickCustId)
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-slate-300 font-medium">Delivery Address</label>
+                      {db.addresses.filter((a) => Number(a.CustomerID) === Number(quickCustId)).length > 0 && (
+                        <div className="flex rounded-lg bg-slate-900 p-0.5 border border-slate-800 text-[10px]">
+                          <button
+                            type="button"
+                            onClick={() => setQuickAddressSubMode('saved')}
+                            className={`px-2 py-0.5 rounded transition-colors ${
+                              quickAddressSubMode === 'saved' ? 'bg-cyan-600 text-white font-medium' : 'text-slate-400'
+                            }`}
+                          >
+                            Saved Address
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setQuickAddressSubMode('new')}
+                            className={`px-2 py-0.5 rounded transition-colors ${
+                              quickAddressSubMode === 'new' ? 'bg-cyan-600 text-white font-medium' : 'text-slate-400'
+                            }`}
+                          >
+                            + New Address
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {db.addresses.filter((a) => Number(a.CustomerID) === Number(quickCustId)).length > 0 && quickAddressSubMode === 'saved' ? (
+                      <select
+                        value={quickAddrId}
+                        onChange={(e) => setQuickAddrId(Number(e.target.value))}
+                        className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-cyan-500"
+                      >
+                        {db.addresses
+                          .filter((a) => Number(a.CustomerID) === Number(quickCustId))
                           .map((a) => {
-                            const area = db.areas.find((ar) => ar.AreaID === a.AreaID);
+                            const area = db.areas.find((ar) => Number(ar.AreaID) === Number(a.AreaID));
                             return (
                               <option key={a.AddressID} value={a.AddressID}>
                                 {a.Street}, {area?.AreaName}
                               </option>
                             );
-                          })
-                      )}
-                    </select>
+                          })}
+                      </select>
+                    ) : (
+                      /* New Address input for this customer */
+                      <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                        {db.addresses.filter((a) => Number(a.CustomerID) === Number(quickCustId)).length === 0 && (
+                          <div className="text-[11px] text-amber-400 bg-amber-950/30 p-2 rounded-lg border border-amber-900/50">
+                            ℹ️ This customer has no saved address yet. Please specify delivery address below:
+                          </div>
+                        )}
+                        <div>
+                          <label className="block text-slate-400 text-[10px] mb-1">Area / Ward *</label>
+                          <select
+                            value={quickNewAreaId}
+                            onChange={(e) => setQuickNewAreaId(Number(e.target.value))}
+                            className="w-full p-2 rounded-lg bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-cyan-500"
+                          >
+                            {db.areas.map((ar) => (
+                              <option key={ar.AreaID} value={ar.AreaID}>
+                                {ar.AreaName} (PIN {ar.Pincode})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 text-[10px] mb-1">Street Address *</label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Plot 42, Green Valley Colony"
+                            value={quickNewStreet}
+                            onChange={(e) => setQuickNewStreet(e.target.value)}
+                            className="w-full p-2 rounded-lg bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-cyan-500"
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </>
               ) : (

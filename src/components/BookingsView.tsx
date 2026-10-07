@@ -49,6 +49,17 @@ interface BookingsViewProps {
     latitude?: number;
     longitude?: number;
   }) => { customerId: number; bookingId: number };
+  createBookingForCustomer?: (params: {
+    customerId: number;
+    addressId?: number | null;
+    areaId?: number;
+    street?: string;
+    typeId: number;
+    scheduledDate: string;
+    timeSlot: TimeSlot;
+    latitude?: number;
+    longitude?: number;
+  }) => void;
   onUpdateBooking?: (bookingId: number, fields: Partial<Booking>) => void;
   onDeleteBooking?: (bookingId: number) => void;
 }
@@ -65,6 +76,7 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
   onAddBooking,
   onOpenDispatchForBooking,
   onCreateCustomerBookingAtomic,
+  createBookingForCustomer,
   onUpdateBooking,
   onDeleteBooking
 }) => {
@@ -100,9 +112,12 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
   const [editStatus, setEditStatus] = useState<BookingStatus>('Pending');
   const [editError, setEditError] = useState<string | null>(null);
 
+  // Delete Booking Confirmation Modal State (replaces window.confirm)
+  const [deletingBooking, setDeletingBooking] = useState<BookingDetailView | null>(null);
+
   // Customer's existing addresses
   const customerAddresses = useMemo(() => {
-    return addresses.filter((a) => a.CustomerID === selectedCustomerId);
+    return addresses.filter((a) => Number(a.CustomerID) === Number(selectedCustomerId));
   }, [addresses, selectedCustomerId]);
 
   // Filtered customer list for modal dropdown
@@ -175,24 +190,36 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
       }
 
       // Existing Customer
-      let addrId = selectedAddressId;
-      if (addressMode === 'new' || customerAddresses.length === 0) {
-        if (!newStreet.trim()) {
-          setWizardError('Street address is required.');
-          return;
+      if (createBookingForCustomer) {
+        createBookingForCustomer({
+          customerId: selectedCustomerId,
+          addressId: addressMode === 'new' || customerAddresses.length === 0 ? null : selectedAddressId,
+          areaId: newAreaId,
+          street: newStreet.trim(),
+          typeId: selectedTypeId,
+          scheduledDate,
+          timeSlot
+        });
+      } else {
+        let addrId = selectedAddressId;
+        if (addressMode === 'new' || customerAddresses.length === 0) {
+          if (!newStreet.trim()) {
+            setWizardError('Street address is required.');
+            return;
+          }
+          const baseLat = 17.4000 + (Math.random() - 0.5) * 0.015;
+          const baseLng = 78.4850 + (Math.random() - 0.5) * 0.015;
+          addrId = onAddAddress(
+            selectedCustomerId,
+            newAreaId,
+            newStreet.trim(),
+            Number(baseLat.toFixed(6)),
+            Number(baseLng.toFixed(6))
+          );
         }
-        const baseLat = 17.4000 + (Math.random() - 0.5) * 0.015;
-        const baseLng = 78.4850 + (Math.random() - 0.5) * 0.015;
-        addrId = onAddAddress(
-          selectedCustomerId,
-          newAreaId,
-          newStreet.trim(),
-          Number(baseLat.toFixed(6)),
-          Number(baseLng.toFixed(6))
-        );
+        onAddBooking(addrId, selectedTypeId, scheduledDate, timeSlot);
       }
 
-      onAddBooking(addrId, selectedTypeId, scheduledDate, timeSlot);
       setIsNewBookingModalOpen(false);
       setNewCustomerName('');
       setNewCustomerPhone('');
@@ -227,13 +254,18 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
     }
   };
 
-  const handleDeleteBooking = (bookingId: number) => {
-    if (window.confirm(`Are you sure you want to delete Booking #${bookingId}? This will remove it from the system.`)) {
+  const handleExecuteDeleteBooking = () => {
+    if (!deletingBooking) return;
+    try {
       if (onDeleteBooking) {
-        onDeleteBooking(bookingId);
+        onDeleteBooking(deletingBooking.BookingID);
       } else {
-        onCancelBooking(bookingId);
+        onCancelBooking(deletingBooking.BookingID);
       }
+      setDeletingBooking(null);
+    } catch (err: any) {
+      console.error('Failed to delete booking', err);
+      setDeletingBooking(null);
     }
   };
 
@@ -409,7 +441,7 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
 
                       {/* Delete Booking button */}
                       <button
-                        onClick={() => handleDeleteBooking(b.BookingID)}
+                        onClick={() => setDeletingBooking(b)}
                         className="p-1 rounded-lg bg-slate-800 hover:bg-rose-950/60 text-slate-400 hover:text-rose-300 transition-colors"
                         title="Delete Booking Record"
                       >
@@ -499,8 +531,13 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
                       onChange={(e) => {
                         const cid = Number(e.target.value);
                         setSelectedCustomerId(cid);
-                        const custAddrs = addresses.filter((a) => a.CustomerID === cid);
-                        if (custAddrs.length > 0) setSelectedAddressId(custAddrs[0].AddressID);
+                        const custAddrs = addresses.filter((a) => Number(a.CustomerID) === cid);
+                        if (custAddrs.length > 0) {
+                          setSelectedAddressId(custAddrs[0].AddressID);
+                          setAddressMode('existing');
+                        } else {
+                          setAddressMode('new');
+                        }
                       }}
                       className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-cyan-500"
                     >
@@ -789,6 +826,75 @@ export const BookingsView: React.FC<BookingsViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE BOOKING CONFIRMATION MODAL */}
+      {deletingBooking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-rose-800/60 rounded-2xl w-full max-w-md p-6 shadow-2xl relative space-y-4">
+            <button
+              onClick={() => setDeletingBooking(null)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 text-rose-400">
+              <div className="p-2.5 rounded-xl bg-rose-950/80 border border-rose-800/80 text-rose-400">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Delete Booking #{deletingBooking.BookingID}</h3>
+                <p className="text-xs text-rose-300/80 font-mono">Immediate permanent record removal</p>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2 text-xs">
+              <div className="flex justify-between text-slate-300">
+                <span className="text-slate-500">Customer:</span>
+                <span className="font-semibold text-white">{deletingBooking.CustomerName}</span>
+              </div>
+              <div className="flex justify-between text-slate-300">
+                <span className="text-slate-500">Address:</span>
+                <span className="truncate max-w-[200px]">{deletingBooking.Street}, {deletingBooking.AreaName}</span>
+              </div>
+              <div className="flex justify-between text-slate-300">
+                <span className="text-slate-500">Capacity & Rate:</span>
+                <span className="font-mono text-cyan-300">{deletingBooking.Capacity_Liters.toLocaleString()} L (₹{deletingBooking.Price})</span>
+              </div>
+              <div className="flex justify-between text-slate-300">
+                <span className="text-slate-500">Scheduled:</span>
+                <span className="font-mono">{deletingBooking.ScheduledDate} • {deletingBooking.TimeSlot}</span>
+              </div>
+              <div className="flex justify-between text-slate-300">
+                <span className="text-slate-500">Current Status:</span>
+                <span className="font-mono font-bold text-amber-300">{deletingBooking.BookingStatus}</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Are you sure you want to delete this booking? Associated delivery records will be cleared and any dispatched tanker will be freed back to the depot as <strong className="text-emerald-400">Available</strong>.
+            </p>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingBooking(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs transition-colors"
+              >
+                Keep Booking
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteDeleteBooking}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5 shadow-lg shadow-rose-600/30"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Confirm & Delete</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
